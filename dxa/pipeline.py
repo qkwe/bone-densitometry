@@ -204,12 +204,13 @@ class Service:
         it.result["features"] = feats
         it.result["spacing"] = spacing
         it.result["criteria"] = self.model.predict(feats, emb, it.region)
+        it.result["probs"], it.result["quality_prob"] = self.model.probabilities(it.result["criteria"], it.region)
 
     @staticmethod
     def _row(it: Item, elapsed: float) -> dict:
         crit = it.result.get("criteria", {})
         violations = [name for name, (flag, _, _) in crit.items() if flag]
-        region = REGION_NAMES.get(it.region, "") + (f" ({SIDE_NAMES[it.side]})" if it.side else "")
+        region = REGION_NAMES.get(it.region, "")  # «Разъяснения V2», вопрос 15: сторона не указывается
         return {
             "path_to_study": it.path,
             "study_uid": it.study_uid,
@@ -217,11 +218,15 @@ class Service:
             "anatomical_region": region if not it.error else "",
             # ТЗ 2.2: проекция. DXA позвоночника и бедра по протоколу — прямая (AP); берём тег, если он есть
             "projection": (str(it.ds.get("ViewPosition", "") or "AP") if it.ds is not None else "") if not it.error else "",
+            "side": SIDE_NAMES.get(it.side, "") if not it.error else "",
             "quality_class": (1 if violations else 0) if not it.error else "",
+            # «Разъяснения V2», вопрос 8: вероятность нарушения в [0;1]
+            "quality_prob": round(it.result.get("quality_prob", 0.0), 4) if not it.error else "",
             "violation_type": "; ".join(violations) if not it.error else "",
             "processing_status": "Failure" if it.error else "Success",
             "time_of_processing": round(elapsed, 3),
-            "details": " | ".join(f"{name}: {text}" for name, (_, _, text) in crit.items()),
+            "details": " | ".join(f"{name}: {text} (вероятность {it.result.get('probs', {}).get(name, 0):.2f})"
+                                  for name, (_, _, text) in crit.items()),
             "duplicate_of": it.duplicate_of or "",
             "error": it.error or "",
         }

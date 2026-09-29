@@ -101,8 +101,8 @@
       <legend>Журнал обработки изображений</legend>
       <div class="tablewrap sunken">
         <table>
-          <thead><tr><th>№</th><th>Исследование</th><th>Область</th><th>Итог</th><th>Нарушения</th><th>Статус</th><th>Время, с</th></tr></thead>
-          <tbody id="rows"><tr><td colspan="7" style="color:#808080;padding:10px">Выберите zip-архив или DICOM-файлы и нажмите «Обработать».</td></tr></tbody>
+          <thead><tr><th>№</th><th>Исследование</th><th>Область</th><th>Итог</th><th>Вероятн.</th><th>Нарушения</th><th>Статус</th><th>Время, с</th></tr></thead>
+          <tbody id="rows"><tr><td colspan="8" style="color:#808080;padding:10px">Выберите zip-архив или DICOM-файлы и нажмите «Обработать».</td></tr></tbody>
         </table>
       </div>
     </fieldset>
@@ -187,6 +187,8 @@ async function poll() {
 const urlJob = new URLSearchParams(location.search).get("job");
 if (urlJob) { job = urlJob; poll(); }
 
+const prob = (r) => (r.quality_prob === "" || r.quality_prob == null ? "" : Number(r.quality_prob).toFixed(2));
+
 function render() {
   const only = $("onlybad").checked;
   const tb = $("rows");
@@ -198,7 +200,7 @@ function render() {
     const tags = (r.violation_type || "").split("; ").filter(Boolean).map((v) => `<span class="tag">${esc(v)}</span>`).join("");
     const verdict = r.processing_status !== "Success" ? "—" : (r.quality_class === 1 ? '<span class="no">БРАК</span>' : '<span class="ok">НОРМА</span>');
     tr.innerHTML = `<td>${k + 1}</td><td title="${esc(r.study_uid)}">…${esc(String(r.study_uid).slice(-10))}</td>` +
-      `<td>${esc(r.anatomical_region)}</td><td>${verdict}</td><td>${tags || (r.duplicate_of ? "(копия)" : "")}</td>` +
+      `<td>${esc(r.anatomical_region)}${r.side ? " (" + esc(r.side) + ")" : ""}</td><td>${verdict}</td><td>${prob(r)}</td><td>${tags || (r.duplicate_of ? "(копия)" : "")}</td>` +
       `<td>${esc(r.processing_status)}</td><td>${esc(r.time_of_processing)}</td>`;
     tr.onclick = () => select(tr, r);
     tb.appendChild(tr);
@@ -213,8 +215,9 @@ function select(tr, r) {
                           : `<div class="ph">${r.duplicate_of ? "КОПИЯ ИЗОБРАЖЕНИЯ<br>" + esc(r.duplicate_of) : "НЕТ ИЗОБРАЖЕНИЯ"}</div>`;
   const det = (r.details || "").split(" | ").join("\n");
   $("details").textContent =
-    `ИССЛЕДОВАНИЕ: ${r.study_uid}\nИЗОБРАЖЕНИЕ:  ${r.image_uid}\nОБЛАСТЬ:      ${r.anatomical_region}\n` +
+    `ИССЛЕДОВАНИЕ: ${r.study_uid}\nИЗОБРАЖЕНИЕ:  ${r.image_uid}\nОБЛАСТЬ:      ${r.anatomical_region}${r.side ? " (" + r.side + ")" : ""}\n` +
     `ИТОГ:         ${r.quality_class === 1 ? "ЕСТЬ НАРУШЕНИЕ" : (r.quality_class === 0 ? "КАЧЕСТВЕННОЕ" : "—")}\n` +
+    `ВЕРОЯТНОСТЬ НАРУШЕНИЯ: ${prob(r) || "—"}\n` +
     `----------------------------------------\n${det}` + (r.error ? `\n\nОШИБКА: ${r.error}` : "");
 }
 </script>

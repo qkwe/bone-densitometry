@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import numpy as np
+from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import f1_score
 from sklearn.model_selection import StratifiedGroupKFold
 
@@ -79,7 +80,34 @@ class QualityModel:
         self.ref_sig = sig_oof
         score = self._femur_score(area, off, sig_oof)
         self.femur_threshold = _best_threshold(y, score)
+
+        # --- калибровка: оценка каждого критерия -> вероятность нарушения (для quality_prob).
+        # Для ротации бедра берётся оценка с out-of-fold SigLIP — как она будет выглядеть на новых данных.
+        self.calib = {}
+        spine_out = [self.predict(feats[i], None, "spine") for i in sp]
+        for L in (LABEL_AXIS, LABEL_POSITIONING, LABEL_FOREIGN):
+            idx = [k for k, i in enumerate(sp) if L in labels[i]]
+            self._fit_calib(("spine", L), [spine_out[k][L][1] for k in idx], [labels[sp[k]][L] for k in idx])
+        roi_idx = [i for i in fe if LABEL_ROI in labels[i]]
+        self._fit_calib(("femur", LABEL_ROI), [self.predict(feats[i], None, "femur")[LABEL_ROI][1] for i in roi_idx],
+                        [labels[i][LABEL_ROI] for i in roi_idx])
+        self._fit_calib(("femur", LABEL_POSITIONING), score, y)
         return self
+
+    def _fit_calib(self, key, score, y):
+        s = np.asarray(score, float)
+        y = np.asarray(y, int)
+        mu, sd = float(s.mean()), float(s.std() + 1e-9)
+        lr = LogisticRegression(C=1.0).fit(((s - mu) / sd)[:, None], y) if 0 < y.sum() < len(y) else None
+        self.calib[key] = (mu, sd, lr, float(y.mean()))
+
+    def probabilities(self, out: dict, region: str) -> tuple[dict, float]:
+        """Вероятность нарушения по каждому критерию и итоговая quality_prob = P(хотя бы одно нарушение)."""
+        probs = {}
+        for L, (_, score, _) in out.items():
+            mu, sd, lr, base = self.calib.get((region, L), (0.0, 1.0, None, 0.0))
+            probs[L] = float(lr.predict_proba([[(score - mu) / sd]])[0, 1]) if lr is not None else base
+        return probs, float(1 - np.prod([1 - p for p in probs.values()]))
 
     def _femur_score(self, area, off, sig):
         u = np.abs(area - self.area_norm)

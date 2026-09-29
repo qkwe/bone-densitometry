@@ -20,8 +20,9 @@ import pandas as pd
 
 from .pipeline import Service
 
-COLUMNS = ["path_to_study", "study_uid", "image_uid", "anatomical_region", "projection", "quality_class", "violation_type",
-           "processing_status", "time_of_processing", "details", "duplicate_of", "error"]
+COLUMNS = ["path_to_study", "study_uid", "image_uid", "anatomical_region", "quality_class", "quality_prob",
+           "violation_type", "processing_status", "time_of_processing",
+           "side", "projection", "details", "duplicate_of", "error"]
 
 
 def save_table(rows: list[dict], output: Path):
@@ -36,7 +37,7 @@ def save_table(rows: list[dict], output: Path):
     with pd.ExcelWriter(xlsx, engine="openpyxl") as w:
         df.to_excel(w, index=False, sheet_name="results")
         ws = w.sheets["results"]
-        for col, width in zip("ABCDEFGHIJKL", (40, 30, 30, 34, 8, 8, 44, 10, 10, 90, 20, 30)):
+        for col, width in zip("ABCDEFGHIJKLMN", (40, 30, 30, 30, 8, 8, 44, 10, 10, 9, 8, 90, 20, 30)):
             ws.column_dimensions[col].width = width
     return df
 

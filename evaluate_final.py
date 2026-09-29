@@ -49,13 +49,16 @@ y_any = np.array([int(i.quality) for i in images])
 
 flags = {L: np.zeros(len(images)) for L in LABELS}
 scores = {L: np.zeros(len(images)) for L in LABELS}
+qprob = np.zeros(len(images))
 for seed in range(SEEDS):
     for tr, te in StratifiedGroupKFold(FOLDS, shuffle=True, random_state=seed).split(emb, y_any, groups):
         m = QualityModel().fit([feats[i] for i in tr], emb[tr], [regions[i] for i in tr], [labels[i] for i in tr], groups[tr])
         for i in te:
-            for L, (flag, score, _) in m.predict(feats[i], emb[i] if regions[i] == "femur" else None, regions[i]).items():
+            out = m.predict(feats[i], emb[i] if regions[i] == "femur" else None, regions[i])
+            for L, (flag, score, _) in out.items():
                 flags[L][i] += flag / SEEDS
                 scores[L][i] += score / SEEDS
+            qprob[i] += m.probabilities(out, regions[i])[1] / SEEDS
 
 
 def boot(y, pred, score, g, n=1000):
@@ -118,16 +121,26 @@ m = metrics(y_any, all_pred, all_score)
 m["ci"] = boot(y_any, all_pred, all_score, groups)
 m.update(n=len(y_any), positives=int(y_any.sum()))
 report["все снимки: качество (есть нарушение)"] = m
+# quality_prob — то, по чему организатор посчитает ROC-AUC (Разъяснения V2, вопрос 8)
+for name, mask in (("позвоночник", np.array([r == "spine" for r in regions])),
+                   ("бедро", np.array([r == "femur" for r in regions])), ("все снимки", np.ones(len(regions), bool))):
+    auc = float(roc_auc_score(y_any[mask], qprob[mask]))
+    lo, hi = boot(y_any[mask], (qprob[mask] >= 0.5).astype(int), qprob[mask], groups[mask])["auc"]
+    report[f"quality_prob ROC-AUC: {name}"] = {"auc": auc, "ci": [lo, hi], "mean_prob": float(qprob[mask].mean()),
+                                              "rate": float(y_any[mask].mean())}
 report["macro-F1 по типам нарушений"] = float(np.mean([v["f1"] for k, v in report.items()
-                                                      if isinstance(v, dict) and "качество" not in k]))
+                                                      if isinstance(v, dict) and "качество" not in k and not k.startswith("quality_prob")]))
 
 print(f"{'критерий':62s} {'n':>4s} {'поз':>4s}  AUC [95% ДИ]         F1 [95% ДИ]         чувств  специф  сбал.т")
 for k, v in report.items():
     if not isinstance(v, dict):
         print(f"{k}: {v:.3f}")
         continue
+    if k.startswith("quality_prob"):
+        print(f"{k:62s} AUC {v['auc']:.3f} [{v['ci'][0]:.2f}; {v['ci'][1]:.2f}]  средняя вероятность {v['mean_prob']:.2f} при доле брака {v['rate']:.2f}")
+        continue
     c = v["ci"]
     print(f"{k:62s} {v['n']:4d} {v['positives']:4d}  {v['auc']:.3f} [{c['auc'][0]:.2f}; {c['auc'][1]:.2f}]  "
           f"{v['f1']:.3f} [{c['f1'][0]:.2f}; {c['f1'][1]:.2f}]  {v['sens']:.2f}    {v['spec']:.2f}    {v['bacc']:.2f}")
 json.dump(report, open("out/metrics_final.json", "w", encoding="utf-8"), ensure_ascii=False, indent=1)
-pickle.dump(dict(flags=flags, scores=scores, keys=keys), open("out/oof_final.pkl", "wb"))
+pickle.dump(dict(flags=flags, scores=scores, qprob=qprob, keys=keys), open("out/oof_final.pkl", "wb"))
