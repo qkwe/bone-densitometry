@@ -1,0 +1,20 @@
+# окружение и кэши Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# медицинские данные и производные от них — не выкладывать
+out/*
+!out/metrics_final.json
+!out/validation.json
+colab/*.npz
+*.pkl
+*.npz
+*.dcm
+
+# веса SigLIP (1.6 ГБ, больше лимита GitHub) — получить: python scripts/export_siglip.py
+weights/
+
+# текст ТЗ организатора — не публикуем
+docs/tz.txt

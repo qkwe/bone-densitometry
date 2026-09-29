@@ -1,0 +1,22 @@
+# Все версии зафиксированы (ТЗ п. 3.2). torch ставится отдельно в Dockerfile (CPU или CUDA).
+# ВАЖНО: numpy / scikit-learn / joblib должны совпадать с версиями, на которых сохранена модель.
+numpy==2.2.6
+scipy==1.15.3
+scikit-learn==1.7.2
+joblib==1.5.2
+pandas==2.2.2
+openpyxl==3.1.5
+pillow==12.2.0
+pydicom==3.0.1
+pylibjpeg==2.0.1
+pylibjpeg-libjpeg==2.3.0
+pylibjpeg-openjpeg==2.4.0
+transformers==5.15.0
+safetensors==0.8.0
+tokenizers==0.22.1
+huggingface_hub==1.27.0
+fastapi==0.115.0
+starlette==0.38.6
+pydantic==2.11.4
+uvicorn==0.30.6
+python-multipart==0.0.32
