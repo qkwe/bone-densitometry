@@ -6,10 +6,12 @@
 | позвоночник | Некорректная укладка | правило ТЗ: не видны гребни подвздошных костей |
 | позвоночник | Присутствуют посторонние предметы | сила тонких ярких линий вне столба, порог по обучению |
 | бедро | Некорректная область интереса | правило ТЗ: < 3 см ниже малого вертела до края кадра |
-| бедро | Некорректная укладка (ротация) | среднее трёх оценок: малый вертел (U-образно), офсет головки, SigLIP |
+| бедро | Некорректная укладка (ротация) | среднее двух оценок: малый вертел (U-образно), офсет головки |
 
 Обучаемые параметры (fit): медиана выступа малого вертела у нормы, эталонные распределения
-для перевода оценок в процентили, логрегрессия на SigLIP, пороги для двух оценок.
+для перевода оценок в процентили, пороги для двух оценок, калибровка вероятностей.
+Нейросетевых признаков нет: замороженный SigLIP в честной CV не улучшал ротацию бедра
+(AUC 0.852 с ним против 0.863 без него), а тянул за собой torch и 1.6 ГБ весов.
 Пороги подбираются по F1 на out-of-fold предсказаниях ОБУЧАЮЩЕЙ части.
 """
 
@@ -18,9 +20,7 @@ from __future__ import annotations
 import numpy as np
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import f1_score
-from sklearn.model_selection import StratifiedGroupKFold
 
-from . import cv
 from .data import LABEL_AXIS, LABEL_FOREIGN, LABEL_POSITIONING, LABEL_ROI
 
 AXIS_LIMIT_DEG = 5.0          # ТЗ
@@ -55,7 +55,7 @@ def _best_threshold(y: np.ndarray, score: np.ndarray) -> float:
 
 
 class QualityModel:
-    def fit(self, feats: list[dict], emb: np.ndarray, regions: list[str], labels: list[dict], groups: np.ndarray):
+    def fit(self, feats: list[dict], regions: list[str], labels: list[dict]):
         regions = np.array(regions)
         # --- позвоночник: посторонние предметы — один порог по обучению
         sp = np.nonzero(regions == "spine")[0]
@@ -63,7 +63,7 @@ class QualityModel:
         ridge = _nan([feats[i].get("fo_ridge_p99", np.nan) for i in sp], 0.0)
         self.fo_threshold = _best_threshold(y_fo, ridge)
 
-        # --- бедро: укладка/ротация — три оценки
+        # --- бедро: укладка/ротация — две оценки
         fe = np.nonzero(regions == "femur")[0]
         y = np.array([labels[i].get(LABEL_POSITIONING, 0) for i in fe])
         area = np.array([feats[i].get("rot_lt_area_mm2", np.nan) for i in fe], float)
@@ -74,29 +74,19 @@ class QualityModel:
         # так же сильно, как крупный вертел 36 мм²; в линейной шкале переротация недооценивалась
         area = np.log1p(np.clip(area, 0, None))
         self.area_norm = float(np.median(area[y == 0]))
-        E = emb[fe]
-        # эталон для SigLIP — out-of-fold вероятности на обучающей части (как будут выглядеть на новых данных)
-        g = groups[fe]
-        sig_oof = np.zeros(len(fe))
-        for tr, te in StratifiedGroupKFold(5, shuffle=True, random_state=0).split(E, y, g):
-            m = cv.linear(16).fit(E[tr], y[tr])
-            sig_oof[te] = m.predict_proba(E[te])[:, 1]
-        self.sig_model = cv.linear(16).fit(E, y)
         self.ref_u = np.abs(area - self.area_norm)
         self.ref_off = -off
-        self.ref_sig = sig_oof
-        score = self._femur_score(area, off, sig_oof)
+        score = self._femur_score(area, off)
         self.femur_threshold = _best_threshold(y, score)
 
-        # --- калибровка: оценка каждого критерия -> вероятность нарушения (для quality_prob).
-        # Для ротации бедра берётся оценка с out-of-fold SigLIP — как она будет выглядеть на новых данных.
+        # --- калибровка: оценка каждого критерия -> вероятность нарушения (для quality_prob)
         self.calib = {}
-        spine_out = [self.predict(feats[i], None, "spine") for i in sp]
+        spine_out = [self.predict(feats[i], "spine") for i in sp]
         for L in (LABEL_AXIS, LABEL_POSITIONING, LABEL_FOREIGN):
             idx = [k for k, i in enumerate(sp) if L in labels[i]]
             self._fit_calib(("spine", L), [spine_out[k][L][1] for k in idx], [labels[sp[k]][L] for k in idx])
         roi_idx = [i for i in fe if LABEL_ROI in labels[i]]
-        self._fit_calib(("femur", LABEL_ROI), [self.predict(feats[i], None, "femur")[LABEL_ROI][1] for i in roi_idx],
+        self._fit_calib(("femur", LABEL_ROI), [self.predict(feats[i], "femur")[LABEL_ROI][1] for i in roi_idx],
                         [labels[i][LABEL_ROI] for i in roi_idx])
         self._fit_calib(("femur", LABEL_POSITIONING), score, y)
         return self
@@ -116,11 +106,11 @@ class QualityModel:
             probs[L] = float(lr.predict_proba([[(score - mu) / sd]])[0, 1]) if lr is not None else base
         return probs, float(1 - np.prod([1 - p for p in probs.values()]))
 
-    def _femur_score(self, area, off, sig):
+    def _femur_score(self, area, off):
         u = np.abs(area - self.area_norm)
-        return (_cdf(self.ref_u, u) + _cdf(self.ref_off, -off) + _cdf(self.ref_sig, sig)) / 3
+        return (_cdf(self.ref_u, u) + _cdf(self.ref_off, -off)) / 2
 
-    def predict(self, feat: dict, emb: np.ndarray | None, region: str) -> dict:
+    def predict(self, feat: dict, region: str) -> dict:
         """{метка: (флаг 0/1, оценка, объяснение)} по критериям области."""
         out = {}
         if region == "spine":
@@ -149,8 +139,7 @@ class QualityModel:
             area_mm2 = float(_nan([feat.get("rot_lt_area_mm2", np.nan)], self.area_fill)[0])
             area = float(np.log1p(max(area_mm2, 0.0)))
             off = float(_nan([feat.get("rot_offset_mm", np.nan)], self.off_fill)[0])
-            sig = float(self.sig_model.predict_proba(emb[None])[0, 1]) if emb is not None else float(np.median(self.ref_sig))
-            s = float(self._femur_score(np.array([area]), np.array([off]), np.array([sig]))[0])
+            s = float(self._femur_score(np.array([area]), np.array([off]))[0])
             kind = "переротация (контур гладкий)" if area < self.area_norm else "недоротация (малый вертел крупный)"
             isch = feat.get("femur_ischium_frac", np.nan)
             no_ischium = bool(np.isfinite(isch) and isch < ISCHIUM_MIN_FRAC)

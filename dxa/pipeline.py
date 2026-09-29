@@ -28,6 +28,10 @@ warnings.filterwarnings("ignore")
 REGION_NAMES = {"spine": "Поясничный отдел позвоночника", "femur": "Проксимальный отдел бедра"}
 SIDE_NAMES = {"l": "левое", "r": "правое"}
 
+# Область без тегов: у аппарата организатора снимок позвоночника 300 пикселей в ширину, бедра — 248–280
+# (252 из 252 снимков обучения). Порог — середина промежутка.
+SPINE_MIN_WIDTH_PX = 290
+
 # подсказки из тегов и имён файлов (в наборе организатора: ПОП, ЛПОБ, ППОБ)
 _SPINE_HINT = re.compile(r"(ПОП|позвон|spine|l1-?l4|lumbar)", re.I)
 _FEMUR_HINT = re.compile(r"(ПОБ|бедр|femur|hip|neck)", re.I)
@@ -120,18 +124,16 @@ def _hint(it: Item, pattern: re.Pattern) -> bool:
 class Service:
     """Загружает модели один раз; process() — обработка каталога/zip."""
 
-    def __init__(self, model_path="models/quality_model.joblib", siglip_dir=features.SIGLIP):
-        bundle = joblib.load(model_path)
-        self.model = bundle["quality"]
-        self.region_clf = bundle["region"]
-        self.embedder = features.Embedder(siglip_dir)
+    def __init__(self, model_path="models/quality_model.joblib"):
+        self.model = joblib.load(model_path)["quality"]
 
     # --- область и сторона
-    def _region(self, it: Item, emb_plain: np.ndarray) -> str:
+    @staticmethod
+    def _region(it: Item) -> str:
         spine_hint, femur_hint = _hint(it, _SPINE_HINT), _hint(it, _FEMUR_HINT)
         if spine_hint != femur_hint:
             return "spine" if spine_hint else "femur"
-        return "spine" if self.region_clf.predict_proba(emb_plain[None])[0, 1] >= 0.5 else "femur"
+        return "spine" if it.array.shape[1] >= SPINE_MIN_WIDTH_PX else "femur"
 
     @staticmethod
     def _anatomical_side(it: Item) -> str:
@@ -193,17 +195,13 @@ class Service:
 
     def _process_image(self, it: Item):
         spacing = pixel_spacing(it.ds, it.array)
-        emb_plain = self.embedder([features.canonical_femur(it.array, None)])[0]
-        it.region = self._region(it, emb_plain)
-        emb = None
+        it.region = self._region(it)
         if it.region == "femur":
-            it.side, side_src = self._side(it)
-            emb = emb_plain if it.side == "r" else self.embedder([features.canonical_femur(it.array, it.side)])[0]
-            it.result["side_source"] = side_src
+            it.side, it.result["side_source"] = self._side(it)
         feats = features.geometry(it.array, spacing, it.region, it.side)
         it.result["features"] = feats
         it.result["spacing"] = spacing
-        it.result["criteria"] = self.model.predict(feats, emb, it.region)
+        it.result["criteria"] = self.model.predict(feats, it.region)
         it.result["probs"], it.result["quality_prob"] = self.model.probabilities(it.result["criteria"], it.region)
 
     @staticmethod

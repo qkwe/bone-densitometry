@@ -29,7 +29,6 @@ from .predict import save_table
 
 JOBS = Path(os.environ.get("DXA_JOBS", "out/jobs"))
 MODEL = os.environ.get("DXA_MODEL", "models/quality_model.joblib")
-SIGLIP = os.environ.get("DXA_SIGLIP")
 app = FastAPI(title="DXA-QC", version="1.0")
 _service: Service | None = None
 _lock = threading.Lock()
@@ -40,7 +39,7 @@ def service() -> Service:
     global _service
     with _lock:
         if _service is None:
-            _service = Service(MODEL, SIGLIP) if SIGLIP else Service(MODEL)
+            _service = Service(MODEL)
     return _service
 
 

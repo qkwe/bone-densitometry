@@ -1,7 +1,7 @@
 """Честная оценка итоговой системы тем же кодом, что в программе (dxa/model.py).
 
 Внешняя CV — StratifiedGroupKFold по исследованию, 5 фолдов × 5 повторов; модель (пороги,
-логрегрессия, эталоны) обучается только на обучающей части фолда. Метрики — по каждому
+калибровка, эталоны) обучается только на обучающей части фолда. Метрики — по каждому
 критерию, по области («качественное / есть нарушение») и в целом, с 95% ДИ бутстрэпом
 по исследованиям. Результат: out/metrics_final.json и таблица в консоли.
 """
@@ -38,10 +38,6 @@ def load_features():
 
 F = load_features()
 feats = [F[k] for k in keys]
-d = np.load("out/emb_siglip_full.npz", allow_pickle=True)
-E_lookup = dict(zip(d["keys"], d["emb"]))
-dim = len(next(iter(E_lookup.values())))
-emb = np.array([E_lookup.get(k, np.zeros(dim)) for k in keys])
 regions = [i.region for i in images]
 labels = [i.labels for i in images]
 groups = np.array([i.study_uid for i in images])
@@ -51,10 +47,10 @@ flags = {L: np.zeros(len(images)) for L in LABELS}
 scores = {L: np.zeros(len(images)) for L in LABELS}
 qprob = np.zeros(len(images))
 for seed in range(SEEDS):
-    for tr, te in StratifiedGroupKFold(FOLDS, shuffle=True, random_state=seed).split(emb, y_any, groups):
-        m = QualityModel().fit([feats[i] for i in tr], emb[tr], [regions[i] for i in tr], [labels[i] for i in tr], groups[tr])
+    for tr, te in StratifiedGroupKFold(FOLDS, shuffle=True, random_state=seed).split(np.zeros(len(images)), y_any, groups):
+        m = QualityModel().fit([feats[i] for i in tr], [regions[i] for i in tr], [labels[i] for i in tr])
         for i in te:
-            out = m.predict(feats[i], emb[i] if regions[i] == "femur" else None, regions[i])
+            out = m.predict(feats[i], regions[i])
             for L, (flag, score, _) in out.items():
                 flags[L][i] += flag / SEEDS
                 scores[L][i] += score / SEEDS

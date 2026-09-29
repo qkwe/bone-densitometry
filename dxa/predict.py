@@ -48,15 +48,11 @@ def main(argv=None):
     ap.add_argument("--output", required=True)
     ap.add_argument("--series", default=None)
     ap.add_argument("--model", default="models/quality_model.joblib")
-    ap.add_argument("--siglip", default=None, help="локальный каталог весов SigLIP (по умолчанию из кэша HF)")
     args = ap.parse_args(argv)
 
     t0 = time.time()
-    kwargs = {"model_path": args.model}
-    if args.siglip:
-        kwargs["siglip_dir"] = args.siglip
-    service = Service(**kwargs)
-    print(f"модели загружены за {time.time() - t0:.1f} с", flush=True)
+    service = Service(args.model)
+    print(f"модель загружена за {time.time() - t0:.1f} с", flush=True)
     rows = service.process(args.input, args.series,
                            progress=lambda i, n: print(f"  исследование {i}/{n}", flush=True))
     df = save_table(rows, Path(args.output))

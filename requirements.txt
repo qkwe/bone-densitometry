@@ -1,4 +1,4 @@
-# Все версии зафиксированы (ТЗ п. 3.2). torch ставится отдельно в Dockerfile (CPU или CUDA).
+# Все версии зафиксированы (ТЗ п. 3.2). Нейросетевых библиотек (torch, transformers) не нужно.
 # ВАЖНО: numpy / scikit-learn / joblib должны совпадать с версиями, на которых сохранена модель.
 numpy==2.2.6
 scipy==1.15.3
@@ -11,10 +11,6 @@ pydicom==3.0.1
 pylibjpeg==2.0.1
 pylibjpeg-libjpeg==2.3.0
 pylibjpeg-openjpeg==2.4.0
-transformers==5.15.0
-safetensors==0.8.0
-tokenizers==0.22.1
-huggingface_hub==1.27.0
 fastapi==0.115.0
 starlette==0.38.6
 pydantic==2.11.4
