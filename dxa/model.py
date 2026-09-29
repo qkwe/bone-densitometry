@@ -26,6 +26,9 @@ from .data import LABEL_AXIS, LABEL_FOREIGN, LABEL_POSITIONING, LABEL_ROI
 AXIS_LIMIT_DEG = 5.0          # ТЗ
 ILIAC_MIN_FRAC = 0.005        # «гребни не видны»: кости по бокам у нижнего края практически нет
 ROI_BOTTOM_CM = 3.0           # ТЗ
+# ТЗ: по 3 см сверху и снизу от области интереса; стандартная область интереса бедра ~7 см —
+# скан короче 7 + 3 + 3 = 13 см не может её вместить (бедро почти не попало в кадр)
+FIELD_MIN_CM = 13.0
 ISCHIUM_MIN_FRAC = 0.02       # ТЗ: седалищная кость должна быть в кадре; «не видна» — кости почти нет
 
 CRITERIA = {
@@ -67,6 +70,9 @@ class QualityModel:
         off = np.array([feats[i].get("rot_offset_mm", np.nan) for i in fe], float)
         self.area_fill, self.off_fill = float(np.nanmedian(area)), float(np.nanmedian(off))
         area, off = _nan(area, self.area_fill), _nan(off, self.off_fill)
+        # площадь выступа — величина «во сколько раз»: гладкий контур 1 мм² и норма 6 мм² отличаются
+        # так же сильно, как крупный вертел 36 мм²; в линейной шкале переротация недооценивалась
+        area = np.log1p(np.clip(area, 0, None))
         self.area_norm = float(np.median(area[y == 0]))
         E = emb[fe]
         # эталон для SigLIP — out-of-fold вероятности на обучающей части (как будут выглядеть на новых данных)
@@ -130,10 +136,18 @@ class QualityModel:
                                   f"тонкие яркие линии вне позвоночника: {r:.3f} (порог {self.fo_threshold:.3f})")
         else:
             b = feat.get("roi_margin_bottom_cm", np.nan)
-            out[LABEL_ROI] = (int(np.isfinite(b) and b < ROI_BOTTOM_CM), float(-_nan([b], 0)[0]),
-                              f"ниже малого вертела {b:.1f} см (норма ТЗ ≥ {ROI_BOTTOM_CM:g}); сверху "
-                              f"{feat.get('roi_margin_top_cm', np.nan):.1f}, медиально {feat.get('roi_margin_medial_cm', np.nan):.1f} см")
-            area = float(_nan([feat.get("rot_lt_area_mm2", np.nan)], self.area_fill)[0])
+            h = feat.get("field_height_cm", np.nan)
+            short_bottom = bool(np.isfinite(b) and b < ROI_BOTTOM_CM)
+            short_field = bool(np.isfinite(h) and h < FIELD_MIN_CM)
+            # оценка — насколько не хватает до нормы ТЗ (больше — хуже)
+            deficit = max(ROI_BOTTOM_CM - float(_nan([b], 0)[0]), FIELD_MIN_CM - float(_nan([h], FIELD_MIN_CM)[0]))
+            out[LABEL_ROI] = (int(short_bottom or short_field), deficit,
+                              f"ниже малого вертела {b:.1f} см (норма ТЗ ≥ {ROI_BOTTOM_CM:g}); длина скана {h:.1f} см "
+                              f"(минимум {FIELD_MIN_CM:g}); сверху {feat.get('roi_margin_top_cm', np.nan):.1f}, "
+                              f"медиально {feat.get('roi_margin_medial_cm', np.nan):.1f} см"
+                              + ("; скан слишком короткий — бедро не помещается" if short_field else ""))
+            area_mm2 = float(_nan([feat.get("rot_lt_area_mm2", np.nan)], self.area_fill)[0])
+            area = float(np.log1p(max(area_mm2, 0.0)))
             off = float(_nan([feat.get("rot_offset_mm", np.nan)], self.off_fill)[0])
             sig = float(self.sig_model.predict_proba(emb[None])[0, 1]) if emb is not None else float(np.median(self.ref_sig))
             s = float(self._femur_score(np.array([area]), np.array([off]), np.array([sig]))[0])
@@ -142,7 +156,7 @@ class QualityModel:
             no_ischium = bool(np.isfinite(isch) and isch < ISCHIUM_MIN_FRAC)
             rotated = s >= self.femur_threshold
             out[LABEL_POSITIONING] = (int(rotated or no_ischium), s,
-                                      f"малый вертел {area:.0f} мм² (норма ~{self.area_norm:.0f}), офсет головки {off:.0f} мм; "
+                                      f"малый вертел {area_mm2:.0f} мм² (норма ~{np.expm1(self.area_norm):.0f}), офсет головки {off:.0f} мм; "
                                       f"оценка ротации {s:.2f} (порог {self.femur_threshold:.2f})"
                                       + (f"; вероятно {kind}" if rotated else "")
                                       + ("; седалищная кость не попала в кадр" if no_ischium else ""))

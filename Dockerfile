@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 # DXA-QC — контроль качества денситометрии. Работает полностью локально: веса внутри образа.
 #
 #   CPU:  docker build -t dxa-qc .

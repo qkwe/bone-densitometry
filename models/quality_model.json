@@ -1,9 +1,9 @@
 {
- "trained": "2026-09-29T20:40:15",
+ "trained": "2026-09-29T20:59:33",
  "n_images": 252,
  "n_labeled": 249,
  "siglip": "C:\\Users\\Пользователь\\Documents\\dxa2\\weights\\siglip-vision",
  "fo_threshold": 0.027859590951067468,
- "femur_threshold": 0.6014666666666667,
- "area_norm": 6.026478853979988
+ "femur_threshold": 0.598488888888889,
+ "area_norm": 1.949685706087115
 }
