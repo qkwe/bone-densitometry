@@ -26,6 +26,7 @@ from .data import LABEL_AXIS, LABEL_FOREIGN, LABEL_POSITIONING, LABEL_ROI
 AXIS_LIMIT_DEG = 5.0          # ТЗ
 ILIAC_MIN_FRAC = 0.005        # «гребни не видны»: кости по бокам у нижнего края практически нет
 ROI_BOTTOM_CM = 3.0           # ТЗ
+ISCHIUM_MIN_FRAC = 0.02       # ТЗ: седалищная кость должна быть в кадре; «не видна» — кости почти нет
 
 CRITERIA = {
     "spine": [LABEL_POSITIONING, LABEL_AXIS, LABEL_FOREIGN],
@@ -137,8 +138,12 @@ class QualityModel:
             sig = float(self.sig_model.predict_proba(emb[None])[0, 1]) if emb is not None else float(np.median(self.ref_sig))
             s = float(self._femur_score(np.array([area]), np.array([off]), np.array([sig]))[0])
             kind = "переротация (контур гладкий)" if area < self.area_norm else "недоротация (малый вертел крупный)"
-            out[LABEL_POSITIONING] = (int(s >= self.femur_threshold), s,
+            isch = feat.get("femur_ischium_frac", np.nan)
+            no_ischium = bool(np.isfinite(isch) and isch < ISCHIUM_MIN_FRAC)
+            rotated = s >= self.femur_threshold
+            out[LABEL_POSITIONING] = (int(rotated or no_ischium), s,
                                       f"малый вертел {area:.0f} мм² (норма ~{self.area_norm:.0f}), офсет головки {off:.0f} мм; "
-                                      f"оценка {s:.2f} (порог {self.femur_threshold:.2f})"
-                                      + (f"; вероятно {kind}" if s >= self.femur_threshold else ""))
+                                      f"оценка ротации {s:.2f} (порог {self.femur_threshold:.2f})"
+                                      + (f"; вероятно {kind}" if rotated else "")
+                                      + ("; седалищная кость не попала в кадр" if no_ischium else ""))
         return out

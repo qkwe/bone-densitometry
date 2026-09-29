@@ -94,6 +94,20 @@ def measure(array: np.ndarray, spacing: Spacing) -> dict:
     lab2, n2 = ndimage.label(very)
     spots = int((ndimage.sum(very, lab2, range(1, n2 + 1)) >= 4).sum()) if n2 else 0
 
+    # зона поиска предметов: вне столба, внутри снятого поля (без нулей дополнения — раньше они
+    # попадали в перцентиль и размывали его по-разному на каждом снимке) и без таза:
+    # края гребней подвздошных костей давали большинство ложных тревог
+    area = lateral & valid[:, None] & inside
+    # таз ищем только вне столба: иначе позвоночник склеивает с тазом рёбра и всё, что к ним
+    # прилегает (в т.ч. косточки белья вверху), и они исключаются вместе с тазом
+    pelvis_mask = ndimage.binary_closing(bone, np.ones((5, 5))) & lateral
+    lab3, _ = ndimage.label(pelvis_mask)
+    ids = [k for k in np.unique(lab3[max(bottom - 3, 0) : bottom + 1]) if k]
+    big = [k for k in ids if (lab3 == k).sum() > bone.size * 0.005]  # крупные кости у нижнего края — таз
+    if big:
+        area &= ~ndimage.binary_dilation(np.isin(lab3, big), iterations=4)
+    fo_score = float(np.percentile(r1[area], 99.5)) if area.any() else 0.0
+
     return dict(
         sp_iliac_frac=iliac_frac,
         sp_iliac_height_mm=iliac_height_mm,
@@ -103,5 +117,5 @@ def measure(array: np.ndarray, spacing: Spacing) -> dict:
         fo_thin_pixels=float(thin.sum()),
         fo_thin_objects=float(long_objs),
         fo_spots=float(spots),
-        fo_ridge_p99=float(np.percentile(r1[lateral & valid[:, None]], 99.5)),
+        fo_ridge_p99=fo_score,
     )

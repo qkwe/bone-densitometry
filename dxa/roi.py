@@ -174,7 +174,34 @@ def measure(array: np.ndarray, spacing: Spacing, side: str | None = None) -> dic
     if lm is None:
         return dict(roi_margin_top_cm=np.nan, roi_margin_bottom_cm=np.nan,
                     roi_margin_medial_cm=np.nan, roi_margin_lateral_cm=np.nan)
-    return {k: v for k, v in lm.items() if k.startswith(("roi_", "field_"))}
+    out = {k: v for k, v in lm.items() if k.startswith(("roi_", "field_"))}
+    out["femur_ischium_frac"] = ischium_fraction(array, lm)
+    return out
+
+
+def ischium_fraction(array: np.ndarray, lm: dict) -> float:
+    """ТЗ: «на изображении представлены большой вертел, шейка бедра и седалищная кость».
+
+    Седалищная кость лежит медиальнее и ниже головки бедра. Считаем долю кости в зоне
+    от 1.2 до 3 радиусов головки ниже её центра, медиальнее 0.3 радиуса от центра.
+    Почти ноль — кость не попала в кадр. (Вертел и шейку отдельно не проверяем: они есть
+    на любом снимке, где найдены головка и диафиз; вертел у края кадра врачи не штрафуют.)
+    """
+    values = normalize(array)
+    field = lm["field"]
+    hx, hy, r = lm["head"]
+    if lm["medial"] == "left":
+        values, field = values[:, ::-1], field[:, ::-1]
+        hx = values.shape[1] - 1 - hx
+    inside = values[field]
+    if not inside.size:
+        return float("nan")
+    soft, dense = np.percentile(inside, (50, 98))
+    # порог плотнее, чем для маски бедра: мягкие ткани у таза не должны сойти за кость
+    bone = (values > soft + (dense - soft) * 0.15) & field
+    y0, y1, x0 = int(hy + 1.2 * r), int(hy + 3.0 * r), int(hx + 0.3 * r)
+    zone = field[y0:y1, x0:]
+    return float(bone[y0:y1, x0:][zone].mean()) if zone.any() else 0.0
 
 
 def deficit(features: dict) -> float:
